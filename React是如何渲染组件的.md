@@ -1,6 +1,6 @@
 # React 是如何渲染组件的
 
- `React 18` 废弃了之前的 `ReactDOM.render()` 函数。，改为 `createRoot` 函数。在本文中，我们将:
+ `React 18` 废弃了之前的 `ReactDOM.render()` 函数，改为 `createRoot` 函数。在本文中，我们将:
 
 1. 展示一个 demo
 
@@ -20,7 +20,6 @@ const Element = () => {
 
 const root = createRoot(document.getElementById('root'));
 root.render(<Element />);
-
 ```
 
 因为`jsx` 文件需要编译，我们使用`babel`来看下编译后的样子
@@ -45,28 +44,71 @@ OK, 现在是熟悉的原生`js` 代码，我们可以开始看看 ``createRoot`
 
 ## 跟踪 createRoot
 
-首先找到它的目录，它从 `react-dom/client` 引入，直接打开 `client.js`
+> 这个过程里，我会关注核心逻辑，忽略某些边界判断和内部标记
+> 
+> 如果遇到没有核心逻辑的包装函数，我将使用 fn->fn 
+
+在调用真正的`createRoot` 函数之前，会经过两个包装函数:
+
+1. `packages/react-dom/client.js` 
+
+这个`createRoot` 在开发模式下(`__DEV__`)会设置一个标志来标记入口点
+
+2. `packages/react-dom/src/client/ReactDOM.js`
+
+这里的`createRoot` 会检查模块是否是从客户端入口点导入的，如果不是，则打印一个警告
+
+OK，现在我们来到了真正实现函数`packages/react-dom/src/client/ReactDOMRoot.js`
 
 ```js
-import {
-  createRoot as createRootImpl,
-  hydrateRoot as hydrateRootImpl,
-  __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED as Internals,
-} from './';
-
 export function createRoot(
   container: Element | Document | DocumentFragment,
   options?: CreateRootOptions,
 ): RootType {
-  if (__DEV__) {
-    Internals.usingClientEntryPoint = true;
+  // 校验container是否是合法的 DOM 元素
+  if (!isValidContainer(container)) {...}
+
+  // 检查容器是否为 BODY 元素或已被标记为 React 容器，如果是，函数会给出相应的警告，如果是则打印警告
+  warnIfReactDOMContainerInDEV(container);
+
+  // 给一些标记设置默认值
+  let isStrictMode = false;
+  let concurrentUpdatesByDefaultOverride = false;
+  let identifierPrefix = '';
+  let onRecoverableError = defaultOnRecoverableError;
+  let transitionCallbacks = null;
+
+  // 如果传入了 options 参数，则使用 options 参数中的值覆盖默认值
+  if (options !== null && options !== undefined) {
+    // 删去判断逻辑
   }
-  try {
-    return createRootImpl(container, options);
-  } finally {
-    if (__DEV__) {
-      Internals.usingClientEntryPoint = false;
-    }
-  }
+
+  // 使用传入的参数创建一个新的容器 FiberRootNode ，这个容器将用于渲染 React 组件树
+  const root = createContainer(
+    container,
+    ConcurrentRoot,
+    null,
+    isStrictMode,
+    concurrentUpdatesByDefaultOverride,
+    identifierPrefix,
+    onRecoverableError,
+    transitionCallbacks,
+  );
+
+  // 将创建的容器标记为根容器
+  markContainerAsRoot(root.current, container);
+
+  // 获取根容器的 DOM 元素
+  const rootContainerElement: Document | Element | DocumentFragment =
+    container.nodeType === COMMENT_NODE
+      ? (container.parentNode: any)
+      : container;
+  
+  // 绑定所有支持的事件
+  listenToAllSupportedEvents(rootContainerElement);
+
+  return new ReactDOMRoot(root);
 }
 ```
+
+其中 `createContainer` 创建了一个容器对象 `FiberRootNode`
